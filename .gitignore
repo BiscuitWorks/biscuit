@@ -1,0 +1,22 @@
+# Gradle
+.git/
+.gradle/
+build/
+
+# Your plugin's download cache
+.biscuit/
+
+# Minecraft run folder (for the run task later)
+run/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# Crash logs and OS junk
+hs_err_pid*
+.DS_Store
