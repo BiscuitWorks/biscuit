@@ -9,14 +9,22 @@ package biscuit.jsonparser;
 
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.ArrayList;
 import java.lang.Character;
 import java.lang.IllegalArgumentException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 
 public class JsonParser {
-    public static void main(String[] args) {
-        Scanner scanner = new Scanner("[1, 2, 3]");
-        Parser parser = new Parser(scanner.scan());
+    @SuppressWarnings("unchecked")
+    public static void main(String[] args) throws Exception {
+        String string = Files.readString(Path.of("/home/zubo/projs/biscuit/.biscuit/version_manifest_v2.json"));
+        Map<String, Object> root = (Map<String, Object>) new Parser(new Lexer(string).scan()).toJson();
+        List<Object> versions = (List<Object>) root.get("versions");
+        Map<String, Object> first = (Map<String, Object>) versions.get(0);
+        System.out.println((String) first.get("id"));
     }
 }
 
@@ -53,7 +61,7 @@ class Parser {
                 return word.value();
             }
             default:
-                throw new IllegalArgumentException("Unexpected token");
+            throw new IllegalArgumentException("Unexpected token");
         }
     }
 
@@ -72,7 +80,7 @@ class Parser {
             return array;
         }
         array.add(value());
-        
+
         word = tokens.get(pos);
         while (word.type() != TokenType.RIGHT_BRACKET) {
             if (word.type() != TokenType.COMMA) {
@@ -144,11 +152,11 @@ class Parser {
     record Member(String key, Object value) {}
 }
 
-class Scanner {
+class Lexer {
     private String source;
     private int index;
 
-    public Scanner(String source) {
+    public Lexer(String source) {
         this.source = source;
         this.index = 0;
     }
@@ -160,112 +168,92 @@ class Scanner {
             char c = source.charAt(index);
 
             switch (c) {
-                case '{':
-                    tokens.add(new Token(TokenType.LEFT_BRACE, null));
-                    break;
-                case '}':
-                    tokens.add(new Token(TokenType.RIGHT_BRACE, null));
-                    break;
-                case '[':
-                    tokens.add(new Token(TokenType.LEFT_BRACKET, null));
-                    break;
-                case ']':
-                    tokens.add(new Token(TokenType.RIGHT_BRACKET, null));
-                    break;
-                case ':':
-                    tokens.add(new Token(TokenType.COLON, null));
-                    break;
-                case ',':
-                    tokens.add(new Token(TokenType.COMMA, null));
-                    break;
-                case '"': {
-                    int start = index++;
-                    while (index < source.length()) {
-                        char ch = source.charAt(index);
-                        if (ch == '"') break;
-                        if (ch == '\\') {
-                            throw new IllegalArgumentException(
-                                "Escapes not supported yet, at index " + index);
-                        }
-                        if (ch < 0x20) {
-                            throw new IllegalArgumentException(
-                                "Control character (code " + (int) ch + ") in string at index " + index);
-                        }
-                        index++;
-                    }
-                    if (index >= source.length()) {
-                        throw new IllegalArgumentException(
-                            "String starting at index " + (start - 1) + " was never closed");
-                    }
-                    tokens.add(new Token(TokenType.STRING, source.substring(start + 1, index)));
-                    break;
+                case '{' -> tokens.add(new Token(TokenType.LEFT_BRACE, null));
+                case '}' -> tokens.add(new Token(TokenType.RIGHT_BRACE, null));
+                case '[' -> tokens.add(new Token(TokenType.LEFT_BRACKET, null));
+                case ']' -> tokens.add(new Token(TokenType.RIGHT_BRACKET, null));
+                case ':' -> tokens.add(new Token(TokenType.COLON, null));
+                case ',' -> tokens.add(new Token(TokenType.COMMA, null));
+                case ' ', '\n', '\r', '\t' -> {}
+                case '"' -> tokens.add(scanString());
+                case 't' -> tokens.add(scanKeyword("true", TokenType.TRUE, Boolean.TRUE));
+                case 'f' -> tokens.add(scanKeyword("false", TokenType.FALSE, Boolean.FALSE));
+                case 'n' -> tokens.add(scanKeyword("null", TokenType.NULL, null));
+                default -> {
+                    if (c == '-' || Character.isDigit(c)) tokens.add(scanNumber());
+                    else throw new IllegalArgumentException("Unknown operator '" + c + "'");
                 }
-                case ' ':
-                case '\n':
-                case '\t':
-                case '\r':
-                break;
-                default: {
-                    if (c == 't') {
-                        if (!source.startsWith("true", index)) throw new IllegalArgumentException("Bad word at index " + index);
-                        tokens.add(new Token(TokenType.TRUE, Boolean.TRUE));
-                        index+=3;
-                        break;
-                    }
-                    if (c == 'f') {
-                        if (!source.startsWith("false", index)) throw new IllegalArgumentException("Bad word at index " + index);
-                        tokens.add(new Token(TokenType.FALSE, Boolean.FALSE));
-                        index+=4;
-                        break;
-                    }
-                    if (c == 'n') {
-                        if (!source.startsWith("null", index)) throw new IllegalArgumentException("Bad word at index " + index);
-                        tokens.add(new Token(TokenType.NULL, null));
-                        index+=3;
-                        break;
-                    }
-                    if (c == '-' || (c >= '0' && c <= '9')) {
-                        int start = index;
-                        int n = source.length();
-                        if (c == '-') index++;
-
-                        if (index >= n || source.charAt(index) < '0' || source.charAt(index) > '9') {
-                            throw new IllegalArgumentException("Digit expected at index " + index);
-                        }
-                        if (source.charAt(index) == '0') {
-                            index++;
-                        } else {
-                            while (index < n && source.charAt(index) >= '0' && source.charAt(index) <= '9') index++;
-                        }
-
-                        if (index < n && source.charAt(index) == '.') {
-                            index++;
-                            if (index >= n || source.charAt(index) < '0' || source.charAt(index) > '9') {
-                                throw new IllegalArgumentException("Digit expected after '.' at index " + index);
-                            }
-                            while (index < n && source.charAt(index) >= '0' && source.charAt(index) <= '9') index++;
-                        }
-
-                        if (index < n && (source.charAt(index) == 'e' || source.charAt(index) == 'E')) {
-                            index++;
-                            if (index < n && (source.charAt(index) == '+' || source.charAt(index) == '-')) index++;
-                            if (index >= n || source.charAt(index) < '0' || source.charAt(index) > '9') {
-                                throw new IllegalArgumentException("Digit expected in exponent at index " + index);
-                            }
-                            while (index < n && source.charAt(index) >= '0' && source.charAt(index) <= '9') index++;
-                        }
-
-                        tokens.add(new Token(TokenType.NUMBER, Double.parseDouble(source.substring(start, index))));
-                        index--;
-                        break;
-                    }
-                    throw new IllegalArgumentException("Unknown operator '" + c + "'");
-                }                
             }
             index++;
         }
         tokens.add(new Token(TokenType.EOF, null));
         return tokens;
+    }
+
+    private Token scanNumber() {
+        int start = index;
+        int n = source.length();
+        if (source.charAt(index) == '-') index++;
+
+        if (index >= n || source.charAt(index) < '0' || source.charAt(index) > '9') {
+            throw new IllegalArgumentException("Digit expected at index " + index);
+        }
+        if (source.charAt(index) == '0') {
+            index++;
+        } else {
+            while (index < n && source.charAt(index) >= '0' && source.charAt(index) <= '9') index++;
+        }
+
+        if (index < n && source.charAt(index) == '.') {
+            index++;
+            if (index >= n || source.charAt(index) < '0' || source.charAt(index) > '9') {
+                throw new IllegalArgumentException("Digit expected after '.' at index " + index);
+            }
+            while (index < n && source.charAt(index) >= '0' && source.charAt(index) <= '9') index++;
+        }
+
+        if (index < n && (source.charAt(index) == 'e' || source.charAt(index) == 'E')) {
+            index++;
+            if (index < n && (source.charAt(index) == '+' || source.charAt(index) == '-')) index++;
+            if (index >= n || source.charAt(index) < '0' || source.charAt(index) > '9') {
+                throw new IllegalArgumentException("Digit expected in exponent at index " + index);
+            }
+            while (index < n && source.charAt(index) >= '0' && source.charAt(index) <= '9') index++;
+        }
+
+        index--;
+        return new Token(TokenType.NUMBER, Double.parseDouble(source.substring(start, index + 1)));
+    }
+
+    private Token scanKeyword(String substring, TokenType type, Object value) {
+        if (!source.startsWith(substring, index)) {
+            throw new IllegalArgumentException("Bad word at index " + index);
+        }
+
+        index += substring.length() - 1;
+        return new Token(type, value);
+    }
+
+    private Token scanString() {
+        int start = index++;
+        while (index < source.length()) {
+            char ch = source.charAt(index);
+            if (ch == '"') break;
+            if (ch == '\\') {
+                throw new IllegalArgumentException(
+                    "Escapes not supported yet, at index " + index);
+            }
+            if (ch < 0x20) {
+                throw new IllegalArgumentException(
+                    "Control character (code " + (int) ch + ") in string at index " + index);
+            }
+            index++;
+        }
+        if (index >= source.length()) {
+            throw new IllegalArgumentException(
+                "String starting at index " + (start) + " was never closed");
+        }
+        return new Token(TokenType.STRING, source.substring(start + 1, index));
     }
 }
 
