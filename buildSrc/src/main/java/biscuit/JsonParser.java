@@ -5,7 +5,7 @@
  * Notice: (C) Copyright 2026 By Osama. All Rights Reserved
  * ====================================== */
 
-package biscuit.jsonparser;
+package biscuit;
 
 import java.util.Map;
 import java.util.HashMap;
