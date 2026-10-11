@@ -26,31 +26,37 @@ public abstract class FetchVersionTask extends DefaultTask {
     @InputFile
     public abstract RegularFileProperty getManifestFile();
 
+    @OutputFile
+    public abstract RegularFileProperty getVersionFile();
+
     @TaskAction
     public void fetchVersion() {
         Path manifestPath = getManifestFile().getAsFile().get().toPath();
-        String src;
-        try {
-            src = Files.readString(manifestPath);
-        } catch (IOException e) {
-            throw new GradleException("Failed to read manifest file.", e.getCause());
-        }
         String mcVersion = getMcVersion().get();
-        Json json = JsonParser.parse(src);
-        JObject versionMeta = null;
 
-        for (Json item: json.getArray("versions").items()) {
-            if (item instanceof JObject v && v.getString("id").equals(mcVersion)) {
-                versionMeta = v;
-                break;
+        Json manifest;
+        try {
+            manifest = JsonParser.parse(Files.readString(manifestPath));
+        } catch (IOException e) {
+            throw new GradleException("Failed to read manifest file.", e);
+        } catch (RuntimeException e) {
+            throw new GradleException("Failed to parse manifest file.", e);
+        }
+
+        JObject versionMeta = findVersion(manifest, mcVersion);
+        System.out.println(getVersionFile().getAsFile().get().toPath());
+        Downloader.downloadVerified(versionMeta.getString("url"), getVersionFile().getAsFile().get().toPath(), versionMeta.getString("sha1"));
+        getLogger().lifecycle("Found Minecraft {}: {}, downloading version meta finished.", mcVersion, versionMeta.getString("url"));
+    }
+
+    private static JObject findVersion(Json manifest, String id) {
+        for (Json item: manifest.getArray("versions").items()) {
+            if (item instanceof JObject v && v.getString("id").equals(id)) {
+                return v;
             }
         }
 
-        if (versionMeta == null) {
-            throw new GradleException("Failed to find metadata for provided version " + mcVersion);
-        }
-        
-        System.out.println(versionMeta);
+        throw new GradleException("Minecraft version " + id + " not found in manifest");
     }
 }
 

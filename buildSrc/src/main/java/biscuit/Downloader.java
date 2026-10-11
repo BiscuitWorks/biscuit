@@ -54,7 +54,7 @@ public class Downloader {
     public static void downloadUnverified(String url, Path path) {
         Path temp = path.resolveSibling(path.getFileName() + ".part");
         try {
-            String actual = download(url, temp);
+            download(url, temp);
             Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
