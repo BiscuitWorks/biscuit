@@ -20,20 +20,20 @@ public class JsonParser {
     protected String src;
     protected int pos;
 
-    public Parser(String src) {
+    public JsonParser(String src) {
         this.src = src;
         this.pos = 0;
     }
 
     public static Json parse(String src) {
-        Parser p = new Parser(src);
+        JsonParser p = new JsonParser(src);
         Json v = p.parseValue();
         p.skipWhitespace();
         if (p.pos != src.length()) throw new RuntimeException("Unexpected trailing data");
         return v;
     }
 
-    public Json parseValue() {
+    private Json parseValue() {
         skipWhitespace();
         char ch = peek();
         return switch (ch) {
@@ -180,6 +180,18 @@ sealed interface Json permits JObject, JArray, JString, JNumber, JBool, JNull {
         Json v = get(path);
         if (v instanceof JBool b) return b.value();
         throw error(path + ": expected type boolean, received " + v.getClass().getSimpleName());
+    }
+
+    default JArray getArray(String path) {
+        Json v = get(path);
+        if (v instanceof JArray a) return a;
+        throw error(path + ": expected array, got " + v.getClass().getSimpleName());
+    }
+
+    default JObject getObject(String path) {
+        Json v = get(path);
+        if (v instanceof JObject o) return o;
+        throw error(path + ": expected object, got " + v.getClass().getSimpleName());
     }
 
     default Json get(String path) {
