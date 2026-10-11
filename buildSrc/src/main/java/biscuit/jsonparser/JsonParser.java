@@ -1,275 +1,269 @@
 /* ======================================
  * File: JsonParser.java
- * Date: 2026-10-10
+ * Date: 2026-10-11
  * Creator: Osama
  * Notice: (C) Copyright 2026 By Osama. All Rights Reserved
  * ====================================== */
 
 package biscuit.jsonparser;
 
-import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.List;
 import java.util.ArrayList;
-import java.lang.Character;
-import java.lang.IllegalArgumentException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-
+import java.lang.Math;
+import java.lang.StringBuilder;
 
 public class JsonParser {
-    @SuppressWarnings("unchecked")
-    public static void main(String[] args) throws Exception {
-        String string = Files.readString(Path.of("/home/zubo/projs/biscuit/.biscuit/version_manifest_v2.json"));
-        Map<String, Object> root = (Map<String, Object>) new Parser(new Lexer(string).scan()).toJson();
-        List<Object> versions = (List<Object>) root.get("versions");
-        Map<String, Object> first = (Map<String, Object>) versions.get(0);
-        System.out.println((String) first.get("id"));
-    }
-}
+    protected String src;
+    protected int pos;
 
-class Parser {
-    List<Token> tokens;
-    int pos;
-
-    public Parser(List<Token> tokens) {
-        this.tokens = tokens;
+    public Parser(String src) {
+        this.src = src;
         this.pos = 0;
     }
 
-    public Object toJson() {
-        Object result = value();
-        if (tokens.get(pos).type() != TokenType.EOF) {
-            throw new IllegalArgumentException("Next token should be EOF");
-        }
-        return result;
+    public static Json parse(String src) {
+        Parser p = new Parser(src);
+        Json v = p.parseValue();
+        p.skipWhitespace();
+        if (p.pos != src.length()) throw new RuntimeException("Unexpected trailing data");
+        return v;
     }
 
-    private Object value() {
-        Token word = tokens.get(pos);
-        if (word.type() == TokenType.LEFT_BRACE) {
-            return object();
-        }
-
-        if (word.type() == TokenType.LEFT_BRACKET) {
-            return array();
-        }
-
-        switch (word.type()) {
-            case STRING, NUMBER, TRUE, FALSE, NULL: {
-                pos++;
-                return word.value();
-            }
-            default:
-            throw new IllegalArgumentException("Unexpected token");
-        }
+    public Json parseValue() {
+        skipWhitespace();
+        char ch = peek();
+        return switch (ch) {
+            case '{' -> parseObject();
+            case '[' -> parseArray();
+            case '"' -> parseString();
+            case 't', 'f', 'n' -> parseLiteral();
+            case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' -> parseNumber();
+            case '\0' -> throw error("Unexpected end of input");
+            default -> throw error("Unexpected character '" + ch + "'");
+        };
     }
 
-    private List<Object> array() {
-        List<Object> array = new ArrayList<>();
-
-        Token word = tokens.get(pos);
-        if (word.type() != TokenType.LEFT_BRACKET) { // should never happen
-            throw new IllegalArgumentException("Array should start with left bracket");
-        }
-
-        pos++;
-        word = tokens.get(pos);
-        if (word.type() == TokenType.RIGHT_BRACKET) {
-            pos++;
-            return array;
-        }
-        array.add(value());
-
-        word = tokens.get(pos);
-        while (word.type() != TokenType.RIGHT_BRACKET) {
-            if (word.type() != TokenType.COMMA) {
-                throw new IllegalArgumentException("Expected comma after a value");
-            }
-
-            pos++;
-            array.add(value());
-            word = tokens.get(pos);
-        }
-
-        pos++;
-        return array;
-    }
-
-    private Map<String, Object> object() {
-        Map<String, Object> object = new HashMap<>();
-
-        Token word = tokens.get(pos);
-        if (word.type() != TokenType.LEFT_BRACE) {
-            throw new IllegalArgumentException("Object should start with left brace");
-        }
-
-        pos++;
-        word = tokens.get(pos);
-        if (word.type() == TokenType.RIGHT_BRACE) {
-            pos++;
-            return object;
-        }
-
-        Member member = member();
-        object.put(member.key(), member.value());
-
-        word = tokens.get(pos);
-        while (word.type() != TokenType.RIGHT_BRACE) {
-            if (word.type() != TokenType.COMMA) {
-                throw new IllegalArgumentException("Expected comma after an object member");
-            }
-
-            pos++;
-            member = member();
-            if (object.containsKey(member.key())) {
-                throw new IllegalArgumentException("Object contains two members with the same key " + member.key());
-            }
-            object.put(member.key(), member.value());
-            word = tokens.get(pos);
-        }
-
-        pos++;
+    // "{" ( member ("," member)* )? "}"
+    private JObject parseObject() {
+        JObject object = new JObject(new HashMap<>());
+        expect("{");
+        skipWhitespace();
+        if (match('}')) return object;
+        do {
+            skipWhitespace();
+            JString key = parseString();
+            skipWhitespace();
+            expect(":");
+            Json value = parseValue();
+            object.add(key.value(), value);
+            skipWhitespace();
+        } while (match(','));
+        expect("}");
         return object;
     }
 
-    private Member member() {
-        Token key = tokens.get(pos);
-        if (key.type() != TokenType.STRING) {
-            throw new IllegalArgumentException("Expected String, found " + key.type());
-        }
-
-        pos++;
-        Token colon = tokens.get(pos);
-        if (colon.type() != TokenType.COLON) {
-            throw new IllegalArgumentException("Expected colon, found " + colon.type());
-        }
-
-        pos++;
-        return new Member((String) key.value(), value());
+    // "[" ( value ("," value)* )? "]"
+    private JArray parseArray() {
+        JArray array = new JArray(new ArrayList<>());
+        expect("[");
+        skipWhitespace();
+        if (match(']')) return array;
+        do {
+            skipWhitespace();
+            Json value = parseValue();
+            array.add(value);
+        } while (match(','));
+        skipWhitespace();
+        expect("]");
+        return array;
     }
 
-    record Member(String key, Object value) {}
+    private JString parseString() {
+        expect("\"");
+        int start = pos;
+        char ch = next();
+        while (ch != '"') {
+            if (ch == '\n') throw error("WRITE A GOOD ERROR MESSAGE HERE PLS");
+            if (ch == '\\') throw error("Escaping inside strings not supported yet.");
+            if (ch == '\0') throw error("Unterminated String");
+            ch = next();
+        }
+        return new JString(src.substring(start, pos - 1));
+    }
+
+    private Json parseLiteral() {
+        switch(peek()) {
+            case 't' -> { expect("true"); return new JBool(true); }
+            case 'f' -> { expect("false"); return new JBool(false); }
+            case 'n' -> { expect("null"); return JNull.INSTANCE; }
+            default -> throw error("Unsupported literal");
+        }
+    }
+
+    private JNumber parseNumber() {
+        int start = pos;
+        match('-');
+        digits();
+        if (match('.')) digits();
+        if (match('e') || match('E')) {
+            if (!match('+')) match('-');
+            digits();
+        }
+
+        return new JNumber(Double.parseDouble(src.substring(start, pos)));
+    }
+
+    private void digits() {
+        if (!isDigit(peek())) throw error("Digit expected");
+        while (isDigit(peek())) pos++;
+    }
+
+    private boolean isDigit(char ch) {
+        return ch >= '0' && ch <= '9';
+    }
+
+    // this can be written in a better way for sure. how
+    private void skipWhitespace() {
+        char ch = peek();
+        while (ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t') {
+            pos++;
+            ch = peek();
+        }
+    }
+
+    private boolean match(char ch) {
+        if (peek() == ch) { pos++; return true; }
+        return false;
+    }
+
+    // this is like an assert
+    private void expect(String str) {
+        if (!src.startsWith(str, pos)) {
+            throw error("Expected " + str + ", found " + peek());
+        }
+        pos += str.length();
+    }
+
+    private char peek() {
+        return pos < src.length() ? src.charAt(pos) : '\0';
+    }
+
+    private char next() {
+        return pos < src.length() ? src.charAt(pos++) : '\0';
+    }
+
+    private RuntimeException error(String msg) {
+        int from = Math.max(0, pos - 5), to = Math.min(src.length(), pos + 5);
+        return new IllegalArgumentException(msg + " at position " + pos + ", near \"" + src.substring(from, to) + "\"");
+    }
 }
 
-class Lexer {
-    private String source;
-    private int index;
+sealed interface Json permits JObject, JArray, JString, JNumber, JBool, JNull {
 
-    public Lexer(String source) {
-        this.source = source;
-        this.index = 0;
+    default String getString(String path) {
+        Json v = get(path);
+        if (v instanceof JString s) return s.value();
+        throw error(path + ": expected type string, received " + v.getClass().getSimpleName());
     }
 
-    public List<Token> scan() {
-        List<Token> tokens = new ArrayList<>();
+    default double getDouble(String path) {
+        Json v = get(path);
+        if (v instanceof JNumber d) return d.value();
+        throw error(path + ": expected type double, received " + v.getClass().getSimpleName());
+    }
 
-        while (index < source.length()) {
-            char c = source.charAt(index);
+    default boolean getBool(String path) {
+        Json v = get(path);
+        if (v instanceof JBool b) return b.value();
+        throw error(path + ": expected type boolean, received " + v.getClass().getSimpleName());
+    }
 
-            switch (c) {
-                case '{' -> tokens.add(new Token(TokenType.LEFT_BRACE, null));
-                case '}' -> tokens.add(new Token(TokenType.RIGHT_BRACE, null));
-                case '[' -> tokens.add(new Token(TokenType.LEFT_BRACKET, null));
-                case ']' -> tokens.add(new Token(TokenType.RIGHT_BRACKET, null));
-                case ':' -> tokens.add(new Token(TokenType.COLON, null));
-                case ',' -> tokens.add(new Token(TokenType.COMMA, null));
-                case ' ', '\n', '\r', '\t' -> {}
-                case '"' -> tokens.add(scanString());
-                case 't' -> tokens.add(scanKeyword("true", TokenType.TRUE, Boolean.TRUE));
-                case 'f' -> tokens.add(scanKeyword("false", TokenType.FALSE, Boolean.FALSE));
-                case 'n' -> tokens.add(scanKeyword("null", TokenType.NULL, null));
-                default -> {
-                    if (c == '-' || Character.isDigit(c)) tokens.add(scanNumber());
-                    else throw new IllegalArgumentException("Unknown operator '" + c + "'");
+    default Json get(String path) {
+        if (path.isEmpty()) throw error("Path is empty.");
+        List<Step> steps = new ArrayList<>();
+
+        for (String seg: path.split("\\.", -1)) {
+            if (seg.isEmpty()) throw error("Empty segment detected.");
+
+            int pos = seg.indexOf('[');
+            if (pos == -1) pos = seg.length();
+            if (pos != 0) steps.add(new Key(seg.substring(0, pos)));
+
+            while (pos < seg.length()) {
+                if (seg.charAt(pos) != '[') throw error("Expected [.");
+                int end = seg.indexOf(']', pos);
+                if (end == -1) throw error("No closing bracket found for segment " + seg);
+                try {
+                    steps.add(new Index(Integer.parseInt(seg.substring(pos + 1, end))));
+                } catch (Exception e) {
+                    throw new RuntimeException("Could not parse " + seg.substring(pos + 1, end) + " into an integer.");
+                }
+                pos = end + 1;
+            }
+        }
+
+        Json curr = this;
+        StringBuilder coveredPath = new StringBuilder();
+
+        for (Step step : steps) {
+            switch (step) {
+                case Key k -> {
+                    if (!(curr instanceof JObject o))
+                        throw error(coveredPath + ": expected object, found " + curr.getClass().getSimpleName());
+                    if (coveredPath.length() > 0) coveredPath.append('.');
+                    coveredPath.append(k.name());
+                    curr = o.field(k.name());
+                    if (curr == null) throw error(coveredPath + ": key not found");
+                }
+                case Index i -> {
+                    if (!(curr instanceof JArray a))
+                        throw error(coveredPath + ": expected array, found " + curr.getClass().getSimpleName());
+                    coveredPath.append('[').append(i.index()).append(']');
+                    if (i.index() < 0 || i.index() >= a.items().size())
+                        throw error(coveredPath + ": index out of range for length " + a.items().size());
+                    curr = a.at(i.index());
                 }
             }
-            index++;
         }
-        tokens.add(new Token(TokenType.EOF, null));
-        return tokens;
+        return curr;
     }
 
-    private Token scanNumber() {
-        int start = index;
-        int n = source.length();
-        if (source.charAt(index) == '-') index++;
-
-        if (index >= n || source.charAt(index) < '0' || source.charAt(index) > '9') {
-            throw new IllegalArgumentException("Digit expected at index " + index);
-        }
-        if (source.charAt(index) == '0') {
-            index++;
-        } else {
-            while (index < n && source.charAt(index) >= '0' && source.charAt(index) <= '9') index++;
-        }
-
-        if (index < n && source.charAt(index) == '.') {
-            index++;
-            if (index >= n || source.charAt(index) < '0' || source.charAt(index) > '9') {
-                throw new IllegalArgumentException("Digit expected after '.' at index " + index);
-            }
-            while (index < n && source.charAt(index) >= '0' && source.charAt(index) <= '9') index++;
-        }
-
-        if (index < n && (source.charAt(index) == 'e' || source.charAt(index) == 'E')) {
-            index++;
-            if (index < n && (source.charAt(index) == '+' || source.charAt(index) == '-')) index++;
-            if (index >= n || source.charAt(index) < '0' || source.charAt(index) > '9') {
-                throw new IllegalArgumentException("Digit expected in exponent at index " + index);
-            }
-            while (index < n && source.charAt(index) >= '0' && source.charAt(index) <= '9') index++;
-        }
-
-        index--;
-        return new Token(TokenType.NUMBER, Double.parseDouble(source.substring(start, index + 1)));
-    }
-
-    private Token scanKeyword(String substring, TokenType type, Object value) {
-        if (!source.startsWith(substring, index)) {
-            throw new IllegalArgumentException("Bad word at index " + index);
-        }
-
-        index += substring.length() - 1;
-        return new Token(type, value);
-    }
-
-    private Token scanString() {
-        int start = index++;
-        while (index < source.length()) {
-            char ch = source.charAt(index);
-            if (ch == '"') break;
-            if (ch == '\\') {
-                throw new IllegalArgumentException(
-                    "Escapes not supported yet, at index " + index);
-            }
-            if (ch < 0x20) {
-                throw new IllegalArgumentException(
-                    "Control character (code " + (int) ch + ") in string at index " + index);
-            }
-            index++;
-        }
-        if (index >= source.length()) {
-            throw new IllegalArgumentException(
-                "String starting at index " + (start) + " was never closed");
-        }
-        return new Token(TokenType.STRING, source.substring(start + 1, index));
+    private static RuntimeException error(String msg) {
+        return new RuntimeException(msg);
     }
 }
 
-enum TokenType {
-    LEFT_BRACE,
-    LEFT_BRACKET,
-    STRING,
-    NUMBER,
-    TRUE,
-    FALSE,
-    NULL,
-    RIGHT_BRACE,
-    RIGHT_BRACKET,
-    COLON,
-    COMMA,
-    EOF
-}
+record JObject(Map<String, Json> fields) implements Json {
+    public void add(String key, Json value) {
+        if (fields.containsKey(key)) {
+            throw new RuntimeException("key " + key + " already exists!");
+        }
 
-record Token(TokenType type, Object value) {}
+        fields.put(key, value);
+    }
+
+    public Json field(String key) {
+        return fields.get(key);
+    }
+}
+record JArray(List<Json> items) implements Json {
+    public void add(Json item) {
+        items.add(item);
+    }
+
+    public Json at(int i) {
+        return items.get(i);
+    }
+}
+record JString(String value) implements Json {}
+record JNumber(double value) implements Json {}
+record JBool(boolean value) implements Json {}
+enum JNull implements Json { INSTANCE }
+
+sealed interface Step permits Key, Index {}
+record Key(String name) implements Step {}
+record Index(int index) implements Step {}
