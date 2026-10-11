@@ -261,6 +261,10 @@ record JObject(Map<String, Json> fields) implements Json {
     public Json field(String key) {
         return fields.get(key);
     }
+
+    public boolean containsKey(String key) {
+        return fields.containsKey(key);
+    }
 }
 record JArray(List<Json> items) implements Json {
     public void add(Json item) {

@@ -32,22 +32,28 @@ public class Downloader {
 
     public static void downloadVerified(String url, Path path, String sha1) {
         if (Files.exists(path) && sha1(path).equalsIgnoreCase(sha1)) return;
-
         Path temp = path.resolveSibling(path.getFileName() + ".part");
-        // Files.createDirectories(path.toAbsolutePath().getParent()); // shouldn't be necessary
-
         try {
             String actual = download(url, temp);
             if (!actual.equalsIgnoreCase(sha1)) {
-                throw new IOException("Hash mismatch for " + url
-                    + ", expected " + sha1 + ", got " + actual);
+                throw new IOException(
+                    "SHA-1 mismatch for '" + url + "'. Expected " + sha1
+                    + ", got " + actual + ". Downloaded file: " + temp
+                );
             }
             Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            throw new UncheckedIOException(
+                "Failed to download verified file from '" + url
+                + "' to '" + path + "' (temporary file: '" + temp + "'). "
+                + e.getMessage(),
+                e
+            );
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
+            throw new RuntimeException(
+                "Interrupted while downloading '" + url + "' to '" + path + "'.", e
+            );
         }
     }
 
@@ -57,24 +63,50 @@ public class Downloader {
             download(url, temp);
             Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            throw new UncheckedIOException(
+                "Failed to download file from '" + url
+                + "' to '" + path + "' (temporary file: '" + temp + "'). "
+                + e.getMessage(),
+                e
+            );
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
+            throw new RuntimeException(
+                "Interrupted while downloading '" + url + "' to '" + path + "'.", e
+            );
         }
     }
 
     private static String download(String url, Path path) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofMinutes(2))
-                    .GET()
-                    .build();
-
+        HttpRequest request;
+        try {
+            request = HttpRequest.newBuilder(URI.create(url))
+            .timeout(Duration.ofMinutes(2))
+            .GET()
+            .build();
+        } catch (IllegalArgumentException e) {
+            throw new IOException("Invalid download URL: '" + url + "'.", e);
+        }
         HashingBodySubscriber subscriber = new HashingBodySubscriber(path);
-        HttpResponse<Path> response = client.send(request, info -> info.statusCode() == 200 ? subscriber : HttpResponse.BodySubscribers.replacing(Path.of("/NULL")));
-
+        HttpResponse<Path> response;
+        try {
+            response = client.send(request, info ->
+                info.statusCode() == 200
+                ? subscriber
+                : HttpResponse.BodySubscribers.replacing(Path.of("/NULL"))
+            );
+        } catch (IOException e) {
+            throw new IOException(
+                "HTTP request failed for '" + url + "' while downloading to '" + path
+                + "': " + e.getMessage(),
+                e
+            );
+        }
         if (response.statusCode() != 200) {
-            throw new RuntimeException("Could not download " + url + ": HTTP " + response.statusCode() + ", expected 200.");
+            throw new IOException(
+                "Download failed for '" + url + "': HTTP "
+                + response.statusCode() + " (expected 200). Destination: '" + path + "'."
+            );
         }
         return subscriber.getSha1();
     }
@@ -102,7 +134,15 @@ class HashingBodySubscriber implements HttpResponse.BodySubscriber<Path> {
     private String sha1;
 
     public HashingBodySubscriber(Path path) {
-        this.inner = HttpResponse.BodySubscribers.ofFile(path);
+        try {
+            this.inner = HttpResponse.BodySubscribers.ofFile(path);
+        } catch (UncheckedIOException e) {
+            throw new UncheckedIOException(
+                "Failed to open temporary download file '" + path + "'. "
+                + e.getMessage(),
+                e.getCause()
+            );
+        }
         try {
             this.md = MessageDigest.getInstance("SHA-1");
         } catch (NoSuchAlgorithmException e) {

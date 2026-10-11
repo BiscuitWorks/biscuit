@@ -49,6 +49,14 @@ public class BiscuitPlugin implements Plugin<Project> {
             task.getVersionMetadata().set(fetchVersion.flatMap(t -> t.getVersionFile()));
             task.getClientJar().set(cacheDir.file("minecraft-" + mcVersion.get() + ".jar"));
         });
+
+        TaskProvider<FetchLibrariesTask> fetchLibs = project.getTasks().register("fetchLibraries", FetchLibrariesTask.class, task -> {
+            task.setGroup("biscuit");
+            task.setDescription("Downloads minecraft dependencies");
+
+            task.getVersionMetadata().set(fetchVersion.flatMap(t -> t.getVersionFile()));
+            task.getLibsDirectory().set(cacheDir.dir("libs"));
+        });
     }
 }
 
