@@ -30,15 +30,25 @@ import java.time.Duration;
 public class Downloader {
     private static final HttpClient client = HttpClient.newHttpClient();
 
-    public static void downloadVerified(String url, Path path, String sha1) {
+    public static void downloadCached(String url, Path path, String sha1) {
         if (Files.exists(path) && sha1(path).equalsIgnoreCase(sha1)) return;
         Path temp = path.resolveSibling(path.getFileName() + ".part");
+
         try {
-            String actual = download(url, temp);
-            if (!actual.equalsIgnoreCase(sha1)) {
+            Files.createDirectories(temp.toAbsolutePath().getParent());
+        } catch (IOException e) {
+            throw new UncheckedIOException(
+                "Failed to create download directory for '" + temp + "': " + e.getMessage(),
+                e
+            );
+        }
+
+        try {
+            String actualSha = download(url, temp);
+            if (!actualSha.equalsIgnoreCase(sha1)) {
                 throw new IOException(
                     "SHA-1 mismatch for '" + url + "'. Expected " + sha1
-                    + ", got " + actual + ". Downloaded file: " + temp
+                    + ", got " + actualSha + ". Downloaded file: " + temp
                 );
             }
             Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
@@ -57,7 +67,13 @@ public class Downloader {
         }
     }
 
-    public static void downloadUnverified(String url, Path path) {
+    public static void downloadUnverifiedCached(String url, Path path) {
+        downloadUnverifiedCached(url, path, false);
+    }
+
+    public static void downloadUnverifiedCached(String url, Path path, boolean ignoreCache) {
+        if (!ignoreCache && Files.exists(path)) return;
+
         Path temp = path.resolveSibling(path.getFileName() + ".part");
         try {
             download(url, temp);
@@ -148,7 +164,7 @@ class HashingBodySubscriber implements HttpResponse.BodySubscriber<Path> {
         } catch (NoSuchAlgorithmException e) {
             throw new AssertionError("SHA-1 is required to be supported by every JVM", e);
         }
-    }    
+    }
 
     public String getSha1() {
         return this.sha1;
